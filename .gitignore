@@ -1,0 +1,9 @@
+ebin
+*.beam
+*.sw*
+deps
+.DS_Store
+erl_crash.dump
+.eunit
+mime.types
+.rebar

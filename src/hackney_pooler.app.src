@@ -1,0 +1,17 @@
+{application, hackney_pooler,
+ [
+  {description, "hackney pooler"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  asn1,
+                  crypto,
+                  public_key,
+                  ssl
+                 ]},
+  {included_applications, [idna, hackney, pooler]},
+  {mod, { hackney_pooler_app, []}},
+  {env, []}
+ ]}.
