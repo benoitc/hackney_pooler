@@ -49,3 +49,4 @@ Internally a pool is maintained using
 
 - Streams are not handled. A body is fetched entirely when the worker return.
 - Config is not validated.
+- no REST api
