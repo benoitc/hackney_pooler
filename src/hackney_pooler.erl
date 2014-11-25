@@ -108,18 +108,24 @@ pooler_loop(#state{parent=Parent, hpool=Hpool}=State) ->
 
 
 do_request(From, HPool,  Method, Url, Headers, Body, Options) ->
+    %% pass the pool to the config.
     Options1 = [{pool, HPool} | Options],
-
-    case hackney:request(Method, Url, Headers, Body, Options1) of
-        {ok, Status, RespHeaders, Ref} ->
-            erlang:put(req, Ref),
-            {ok, RespBody} = hackney:body(Ref),
-            From ! {self(), {ok, Status, RespHeaders, RespBody}};
-        {ok, Status, RespHeaders} ->
-            From ! {self(), {ok, Status, RespHeaders, <<>>}};
-        Error ->
-            From ! {self(), {error ,Error}}
-    end.
+    %% do the request
+    Reply = case hackney:request(Method, Url, Headers, Body, Options1) of
+                {ok, Status, RespHeaders, Ref} ->
+                    erlang:put(req, Ref),
+                    case hackney:body(Ref) of
+                        {ok, RespBody} -> {ok, Status, RespHeaders, RespBody};
+                        Error -> Error
+                    end;
+                {ok, Status, RespHeaders} ->
+                    {ok, Status, RespHeaders, <<>>};
+                Error ->
+                    Error
+            end,
+    %% send the reply
+    From ! {self(), Reply},
+    ok.
 
 
 terminate(_Reason, _State) ->
