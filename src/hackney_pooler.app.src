@@ -9,9 +9,11 @@
                   asn1,
                   crypto,
                   public_key,
-                  ssl
+                  ssl,
+                  hackney,
+                  pooler
                  ]},
-  {included_applications, [idna, hackney, pooler]},
+  {included_applications, [idna]},
   {mod, { hackney_pooler_app, []}},
   {env, []}
  ]}.

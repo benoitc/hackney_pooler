@@ -23,10 +23,4 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    %% hackney supervisor
-    HackneySup = {hackney_sup, {hackney_sup, start_link, []},
-                  permanent, infinity, supervisor, [hackney_sup]},
-    %% pooler supervisor
-    PoolerSup = {pooler_sup, {pooler_sup, start_link, []},
-                 permanent, infinity, supervisor, [pooler_sup]},
-    {ok, { {one_for_one, 5, 10}, [HackneySup, PoolerSup]} }.
+    {ok, { {one_for_one, 5, 10}, []} }.
