@@ -133,7 +133,8 @@ terminate(_Reason, _State) ->
     case erlang:get(req) of
         undefined -> ok;
         Ref ->
-            hackney:close(Ref)
+            catch hackney:close(Ref),
+            ok
     end.
 
 
