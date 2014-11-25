@@ -1,6 +1,6 @@
 -module(hackney_pooler).
 
--export([new_pool/2]).
+-export([new_pool/2, rm_pool/1]).
 -export([request/3, request/4, request/5, request/6]).
 
 
@@ -36,6 +36,9 @@ new_pool(Name, Config) ->
     PoolConfig = Config1 ++ [{start_mfa,
                               {?MODULE, istart_link, [HPool]}}],
     pooler:new_pool(PoolConfig).
+
+rm_pool(Name) ->
+    pooler:rm_pool(Name).
 
 
 %% @doc make a request
