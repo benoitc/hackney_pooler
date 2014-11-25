@@ -76,11 +76,11 @@ req(Proc, R) ->
     Ref = erlang:monitor(process, Proc),
     Proc ! ?HCALL(self(), R),
     receive
-	{'DOWN', Ref, process, Proc, _Info} ->
+        {'DOWN', Ref, process, Proc, _Info} ->
             badarg;
-	{Proc, Reply} ->
-	    erlang:demonitor(Ref, [flush]),
-	    Reply
+        {Proc, Reply} ->
+            erlang:demonitor(Ref, [flush]),
+            Reply
     end.
 
 
@@ -97,9 +97,11 @@ init(Parent, HPool) ->
 pooler_loop(#state{parent=Parent, hpool=Hpool}=State) ->
     receive
         ?HCALL(From, {request, Method, Url, Headers, Body, Options}) ->
-            do_request(From, Hpool, Method, Url, Headers, Body, Options);
+
+            do_request(From, Hpool, Method, Url, Headers, Body, Options),
+            pooler_loop(State);
         {'EXIT', Parent, Reason} ->
-			terminate(Reason, State),
+            terminate(Reason, State),
             exit(Reason);
         {system, From, Req} ->
             sys:handle_system_msg(Req, From, Parent, ?MODULE, [], State);
