@@ -54,10 +54,11 @@ new_pool(PoolName, Config) ->
 rm_pool(Name) ->
     pooler:rm_pool(Name),
     %% stop hackney pools
+    PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     HPools = [{Name, Ref} || [Ref] <- ets:match(hackney_pool,
                                                 {{Name, '$1'}, '_'})],
     lists:foreach(fun(HPool) ->
-                          catch hackney:stop_pool(HPool)
+                          catch PoolHandler:stop_pool(HPool)
                   end, HPools),
     ok.
 
