@@ -44,6 +44,12 @@ Internally a pool is maintained using
          {<<"Access-Control-Max-Age">>,<<"86400">>}],
         <<"<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"utf-8\"/>\n    <title>Friendpaste - Welcome"...>>}
 
+
+> Note: by default a pooler is launch with only 1 connection pool. Using the
+> `concurrency` option will create N pools of connections whre 2 * N + 1 =
+> number of i/o threads. You can force the number of connections pools using
+> `{concurrency, N}`.
+
 ## Example of an asynchronous request:
 
     1> application:ensure_all_started(hackney_pooler).
