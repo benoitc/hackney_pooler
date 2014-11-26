@@ -48,12 +48,18 @@ new_pool(PoolName, Config) ->
     pooler:new_pool(PoolConfig).
 
 rm_pool(Name) ->
-    pooler:rm_pool(Name).
+    pooler:rm_pool(Name),
+    %% stop hackney pools
+    HPools = [{Name, Ref} || [Ref] <- ets:match(hackney_pool,
+                                                {{Name, '$1'}, '_'})],
+    lists:foreach(fun(HPool) ->
+                          catch hackney:stop_pool(HPool)
+                  end, HPools),
+    ok.
 
 pool_stats(Name) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     HPools = [{Name, Ref} || [Ref] <- ets:match(hackney_pool, {{Name, '$1'}, '_'})],
-    io:format("got ~p~n", [HPools]),
     [{workers, pooler:pool_stats(Name)},
      {hpools, [{PoolHandler:find_pool(P), PoolHandler:count(P)}
                || P <- HPools]}].
@@ -227,7 +233,7 @@ send_async(To, PoolName, _Reply) ->
                                 "(ignored): ~w~n", [PoolName, To]),
     ok.
 
-terminate(_Reason, #state{hpools=HPools}) ->
+terminate(_Reason, _State) ->
     %% if a request is running, force close
     case erlang:get(req) of
         undefined -> ok;
@@ -235,10 +241,6 @@ terminate(_Reason, #state{hpools=HPools}) ->
             catch hackney:close(Ref),
             ok
     end,
-    %% stop hackney pools
-    lists:foreach(fun(HPool) ->
-                          catch hackney:stop_pool(HPool)
-                  end, HPools),
     ok.
 
 
