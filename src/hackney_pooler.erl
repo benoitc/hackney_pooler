@@ -119,7 +119,6 @@ init(Parent, HPool, Name) ->
 pooler_loop(#state{parent=Parent, hpool=Hpool, name=PoolName}=State) ->
     receive
         ?HCALL(From, {request, Method, Url, Headers, Body, Options}) ->
-
             do_request(From, Hpool, Method, Url, Headers, Body, Options),
             pooler_loop(State);
         ?HCAST(To, {request, Method, Url, Headers, Body, Options}) ->
@@ -180,18 +179,28 @@ do_async_request(PoolName, To, HPool,  Method, Url, Headers, Body, Options) ->
                     Error
             end,
 
-    case To of
-        nil -> ok;
-        Pid when is_pid(Pid) -> Pid ! {hpool, {PoolName, Reply}};
-        Fun when is_function(Fun) -> catch Fun({PoolName, Reply});
-        {Fun, Acc} when is_function(Fun) -> catch Fun({PoolName, Reply}, Acc);
-        _ ->
-            error_logger:format("** hackney_pooler: unexpected async callback"
-                                "(ignored): ~w~n", [To]),
-            ok
+    try
+        send_async(To, PoolName, Reply)
+    catch
+        _:_ ->
+            error_logger:error("** hackney_pooler ~p: unexpected error"
+                                "(ignored): ~w~n", [PoolName,
+                                                    erlang:get_stacktrace()])
     end,
     ok.
 
+send_async(nil, _PoolName, _Reply) ->
+    ok;
+send_async(Pid, PoolName, Reply) when is_pid(Pid) ->
+    Pid ! {hpool, {PoolName, Reply}};
+send_async(Fun, PoolName, Reply) when is_function(Fun) ->
+    Fun({PoolName, Reply});
+send_async({Fun, Acc}, PoolName, Reply) when is_function(Fun) ->
+    Fun({PoolName, Reply}, Acc);
+send_async(To, PoolName, _Reply) ->
+    error_logger:format("** ~p hackney_pooler: unexpected async callback"
+                                "(ignored): ~w~n", [PoolName, To]),
+    ok.
 
 terminate(_Reason, _State) ->
     %% if a request is running, force close
