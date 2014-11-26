@@ -18,18 +18,22 @@ new_pool(PoolName, Config) ->
     MaxCount = proplists:get_value(max_count, Config, 50),
     %% get the number of hackney pools to launch
     {NPool, MaxConn} = case proplists:get_value(concurrency, Config) of
-                true ->
-                    %% if concurrency is set to true then we launch, then
-                    %% we launch N pools where 2 * N + 2 is the number of
-                    %% threads with a min of 1. The number of connections is
-                    %% then equally shared between them.
-                    N = trunc((erlang:system_info(thread_pool_size) - 1) / 2),
-                    NPool0 = erlang:max(1, N),
-                    MaxConn0 = erlang:max(10, trunc(MaxCount / NPool0)),
-                    {NPool0, MaxConn0};
-                _ ->
-                    {1, MaxCount}
-            end,
+                           NPool0 when is_integer(NPool0) ->
+                               MaxConn0 = erlang:max(10, trunc(MaxCount / NPool0)),
+                               {NPool0, MaxConn0};
+                           true ->
+                               %% if concurrency is set to true then we
+                               %% launch, then we launch N pools where 2 * N +
+                               %% 2 is the number of threads with a min of 1.
+                               %% The number of connections is then equally
+                               %% shared between them.
+                               N = trunc((erlang:system_info(thread_pool_size) - 1) / 2),
+                               NPool0 = erlang:max(1, N),
+                               MaxConn0 = erlang:max(10, trunc(MaxCount / NPool0)),
+                               {NPool0, MaxConn0};
+                           _ ->
+                               {1, MaxCount}
+                       end,
     HConfig =  [{max_connections, MaxConn}],
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     %% start pools depending on the concurrency
