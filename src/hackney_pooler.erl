@@ -1,6 +1,6 @@
 -module(hackney_pooler).
 
--export([new_pool/2, rm_pool/1]).
+-export([new_pool/2, rm_pool/1, pool_stats/1]).
 -export([request/3, request/4, request/5, request/6,
          async_request/6, async_request/7]).
 
@@ -8,39 +8,55 @@
 -export([istart_link/2, init/3,
          system_continue/3, system_terminate/4, system_code_change/4]).
 
--record(state, {parent, hpool, name}).
+-record(state, {parent, hpools, name}).
 
 
 -define(HCALL(Pid, Req), {'$hackney_call', Pid, Req}).
 -define(HCAST(Pid, Req), {'$hackney_cast', Pid, Req}).
 
-
-new_pool(Name, Config) ->
-    %% maybe initiaalise the Hackney connections pool
-    HPool = case proplists:get_value(hackney_pool, Config) of
-                undefined ->
-                    Group = proplists:get_value(group, Config),
-                    MaxConn = proplists:get_value(max_count, Config,
-                                                  50),
-                    PoolName = Group,
-                    PoolHandler = hackney_app:get_app_env(pool_handler,
-                                                          hackney_pool),
-                    %% start Hackney pool
-                    HConfig =  [{max_connections, MaxConn}],
-                    PoolHandler:start_pool(PoolName, HConfig),
-                    PoolName;
-                PoolName ->
-                    PoolName
+new_pool(PoolName, Config) ->
+    MaxCount = proplists:get_value(max_count, Config, 50),
+    %% get the number of hackney pools to launch
+    {NPool, MaxConn} = case proplists:get_value(concurrency, Config) of
+                true ->
+                    %% if concurrency is set to true then we launch, then
+                    %% we launch N pools where 2 * N + 2 is the number of
+                    %% threads with a min of 1. The number of connections is
+                    %% then equally shared between them.
+                    N = trunc((erlang:system_info(thread_pool_size) - 1) / 2),
+                    NPool0 = erlang:max(1, N),
+                    MaxConn0 = erlang:max(10, trunc(MaxCount / NPool0)),
+                    {NPool0, MaxConn0};
+                _ ->
+                    {1, MaxCount}
             end,
+    HConfig =  [{max_connections, MaxConn}],
+    PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+    %% start pools depending on the concurrency
+    HPools = lists:foldl(fun(_, Acc) ->
+                                 Name = {PoolName, make_ref()},
+                                 %% start Hackney pool
+                                 ok = PoolHandler:start_pool(Name, HConfig),
+                                 [Name | Acc]
+                         end, [], lists:seq(1, NPool)),
+
 
     %% start worker pool
-    Config1 = [{name, Name} |Config],
+    Config1 = [{name, PoolName} |Config],
     PoolConfig = Config1 ++ [{start_mfa,
-                              {?MODULE, istart_link, [HPool, Name]}}],
+                              {?MODULE, istart_link, [HPools, PoolName]}}],
     pooler:new_pool(PoolConfig).
 
 rm_pool(Name) ->
     pooler:rm_pool(Name).
+
+pool_stats(Name) ->
+    PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+    HPools = [{Name, Ref} || [Ref] <- ets:match(hackney_pool, {{Name, '$1'}, '_'})],
+    io:format("got ~p~n", [HPools]),
+    [{workers, pooler:pool_stats(Name)},
+     {hpools, [{PoolHandler:find_pool(P), PoolHandler:count(P)}
+               || P <- HPools]}].
 
 
 %% @doc make a request
@@ -106,26 +122,28 @@ cast_req(Proc, To, R) ->
     end.
 
 
-istart_link(HPool, Name) ->
-    {ok, proc_lib:spawn_link(hackney_pooler, init, [self(), HPool, Name])}.
+istart_link(HPools, Name) ->
+    {ok, proc_lib:spawn_link(hackney_pooler, init, [self(), HPools, Name])}.
 
 
-init(Parent, HPool, Name) ->
+init(Parent, HPools, Name) ->
     process_flag(trap_exit, true),
-    pooler_loop(#state{parent=Parent, hpool=HPool, name=Name}).
+    pooler_loop(#state{parent=Parent, hpools=HPools, name=Name}).
 
 
 
-pooler_loop(#state{parent=Parent, hpool=Hpool, name=PoolName}=State) ->
+pooler_loop(#state{parent=Parent, hpools=HPools, name=PoolName}=State) ->
     receive
         ?HCALL(From, {request, Method, Url, Headers, Body, Options}) ->
-            do_request(From, Hpool, Method, Url, Headers, Body, Options),
-            pooler_loop(State);
+            {HPool, HPools2} = choose_pool(HPools),
+            do_request(From, HPool, Method, Url, Headers, Body, Options),
+            pooler_loop(State#state{hpools=HPools2});
         ?HCAST(To, {request, Method, Url, Headers, Body, Options}) ->
-            do_async_request(PoolName, To, Hpool, Method, Url, Headers, Body,
+            {HPool, HPools2} = choose_pool(HPools),
+            do_async_request(PoolName, To, HPool, Method, Url, Headers, Body,
                              Options),
             pooler:return_member(PoolName, self(), ok),
-            pooler_loop(State);
+            pooler_loop(State#state{hpools=HPools2});
         {'EXIT', Parent, Reason} ->
             terminate(Reason, State),
             exit(Reason);
@@ -189,6 +207,13 @@ do_async_request(PoolName, To, HPool,  Method, Url, Headers, Body, Options) ->
     end,
     ok.
 
+
+%% balance pool
+choose_pool([HPool]=HPools) ->
+    {HPool, HPools};
+choose_pool([HPool | Rest]) ->
+    {HPool, Rest ++ [HPool]}.
+
 send_async(nil, _PoolName, _Reply) ->
     ok;
 send_async(Pid, PoolName, Reply) when is_pid(Pid) ->
@@ -202,14 +227,19 @@ send_async(To, PoolName, _Reply) ->
                                 "(ignored): ~w~n", [PoolName, To]),
     ok.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{hpools=HPools}) ->
     %% if a request is running, force close
     case erlang:get(req) of
         undefined -> ok;
         Ref ->
             catch hackney:close(Ref),
             ok
-    end.
+    end,
+    %% stop hackney pools
+    lists:foreach(fun(HPool) ->
+                          catch hackney:stop_pool(HPool)
+                  end, HPools),
+    ok.
 
 
 %%-----------------------------------------------------------------
