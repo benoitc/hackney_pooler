@@ -52,6 +52,10 @@ Internally a pool is maintained using
 
 ## Example of an asynchronous request:
 
+An asynchronous request send is like a cast, it handle the request in the
+worker and can send the result to a Pid or a function. If a function is given,
+it will be handled in the worker.
+
     1> application:ensure_all_started(hackney_pooler).
     {ok,[asn1,crypto,public_key,ssl,idna,hackney,pooler,
         hackney_pooler]}
@@ -66,6 +70,9 @@ Internally a pool is maintained using
         {<<"Content-Type">>,
             <<"text/html; charset=utf-8">>},
         {<<"Transfer-Encoding">>,<<"chunked">>}, [...]
+
+> An async request can send requests to a pid, a function (arity 1 or 2) or
+> nothing if nil is given.
 
 ## Known limitations
 
