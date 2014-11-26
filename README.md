@@ -20,7 +20,7 @@ between multiples groups if given in the pool config.
 Internally a pool is maintained using
 [pooler](https://github.com/seth/pooler).
 
-## Example of usage:
+## Example of a synchronous request:
 
     1> application:ensure_all_started(hackney_pooler).
     {ok,[asn1,crypto,public_key,ssl,hackney_pooler]}
@@ -44,6 +44,22 @@ Internally a pool is maintained using
          {<<"Access-Control-Max-Age">>,<<"86400">>}],
         <<"<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"utf-8\"/>\n    <title>Friendpaste - Welcome"...>>}
 
+## Example of an asynchronous request:
+
+    1> application:ensure_all_started(hackney_pooler).
+    {ok,[asn1,crypto,public_key,ssl,idna,hackney,pooler,
+        hackney_pooler]}
+        2>  hackney_pooler:new_pool(test, [{group, testing}, {max_count, 50}, {init_count, 50} ]).
+    {ok,<0.61.0>}
+    3>  hackney_pooler:async_request(test, self(), get, <<"https://friendpaste.com">>, [], <<>>, []).
+    ok
+    4> flush().
+    Shell got {hpool,{test,{ok,200,
+        [{<<"Server">>,<<"nginx/0.7.62">>},
+        {<<"Date">>,<<"Wed, 26 Nov 2014 11:00:37 GMT">>},
+        {<<"Content-Type">>,
+            <<"text/html; charset=utf-8">>},
+        {<<"Transfer-Encoding">>,<<"chunked">>}, [...]
 
 ## Known limitations
 
