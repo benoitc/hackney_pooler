@@ -94,7 +94,7 @@ request(PoolName, Method, URL, Headers, Body) ->
 request(PoolName, Method, URL, Headers, Body, Options) ->
     Proc = pooler:take_member(PoolName),
     try
-        call(Proc, {request, Method, URL, Headers, Body, Options})
+        req(Proc, {request, Method, URL, Headers, Body, Options})
     after
         pooler:return_member(PoolName, Proc, ok)
     end.
@@ -108,10 +108,10 @@ async_request(PoolName, Method, URL, Headers, Body, Options) ->
                     list()) -> ok.
 async_request(PoolName, To, Method, URL, Headers, Body, Options) ->
     Proc = pooler:take_member(PoolName),
-    cast(Proc, To, {request, Method, URL, Headers, Body, Options}),
+    cast_req(Proc, To, {request, Method, URL, Headers, Body, Options}),
     ok.
 
-call(Proc, R) ->
+req(Proc, R) ->
     Ref = erlang:monitor(process, Proc),
     Proc ! ?HCALL(self(), R),
     receive
@@ -123,7 +123,7 @@ call(Proc, R) ->
     end.
 
 
-cast(Proc, To, R) ->
+cast_req(Proc, To, R) ->
     Msg = ?HCAST(To, R),
     case catch erlang:send(Proc, Msg, [noconnect]) of
         noconnect ->
@@ -147,8 +147,7 @@ pooler_loop(#state{parent=Parent, hpools=HPools, name=PoolName}=State) ->
     receive
         ?HCALL(From, {request, Method, Url, Headers, Body, Options}) ->
             {HPool, HPools2} = choose_pool(HPools),
-            do_request(PoolName, From, HPool, Method, Url, Headers, Body,
-                       Options),
+            do_request(From, HPool, Method, Url, Headers, Body, Options),
             pooler_loop(State#state{hpools=HPools2});
         ?HCAST(To, {request, Method, Url, Headers, Body, Options}) ->
             {HPool, HPools2} = choose_pool(HPools),
@@ -168,11 +167,24 @@ pooler_loop(#state{parent=Parent, hpools=HPools, name=PoolName}=State) ->
     end.
 
 
-do_request(PoolName, From, HPool,  Method, Url, Headers, Body, Options) ->
+do_request(From, HPool,  Method, Url, Headers, Body, Options) ->
     %% pass the pool to the config.
     Options1 = [{pool, HPool} | Options],
     %% do the request
-    Reply = hrequest(PoolName, Method, Url, Headers, Body, Options1),
+    Reply = case hackney:request(Method, Url, Headers, Body, Options1) of
+                {ok, Status, RespHeaders, Ref} ->
+                    erlang:put(req, Ref),
+                    case hackney:body(Ref) of
+                        {ok, RespBody} ->
+                            erlang:erase(req),
+                            {ok, Status, RespHeaders, RespBody};
+                        Error -> Error
+                    end;
+                {ok, Status, RespHeaders} ->
+                    {ok, Status, RespHeaders, <<>>};
+                Error ->
+                    Error
+            end,
     %% send the reply
     From ! {self(), Reply},
     ok.
@@ -181,7 +193,21 @@ do_async_request(PoolName, To, HPool,  Method, Url, Headers, Body, Options) ->
     %% pass the pool to the config.
     Options1 = [{pool, HPool} | Options],
     %% do the request
-    Reply = hrequest(PoolName, Method, Url, Headers, Body, Options1),
+    Reply = case hackney:request(Method, Url, Headers, Body, Options1) of
+                {ok, Status, RespHeaders, Ref} ->
+                    erlang:put(req, Ref),
+                    case hackney:body(Ref) of
+                        {ok, RespBody} ->
+                            erlang:erase(req),
+                            {ok, Status, RespHeaders, RespBody};
+                        Error -> Error
+                    end;
+                {ok, Status, RespHeaders} ->
+                    {ok, Status, RespHeaders, <<>>};
+                Error ->
+                    Error
+            end,
+
     try
         send_async(To, PoolName, Reply)
     catch
@@ -198,35 +224,6 @@ choose_pool([HPool]=HPools) ->
     {HPool, HPools};
 choose_pool([HPool | Rest]) ->
     {HPool, Rest ++ [HPool]}.
-
-
-hrequest(PoolName, Method, Url, Headers, Body, Options) ->
-    try
-        hrequest1(Method, Url, Headers, Body, Options)
-    catch
-        _:Error ->
-            error_logger:error("** hackney_pooler ~p: unexpected error"
-                                "(ignored): ~w~n", [PoolName,
-                                                    erlang:get_stacktrace()]),
-            exit({error, Error})
-    end.
-
-hrequest1(Method, Url, Headers, Body, Options) ->
-    case hackney:request(Method, Url, Headers, Body, Options) of
-        {ok, Status, RespHeaders, Ref} ->
-            erlang:put(req, Ref),
-            case hackney:body(Ref) of
-                {ok, RespBody} ->
-                    erlang:erase(req),
-                    {ok, Status, RespHeaders, RespBody};
-                Error -> Error
-            end;
-        {ok, Status, RespHeaders} ->
-            {ok, Status, RespHeaders, <<>>};
-        Error ->
-            Error
-    end.
-
 
 send_async(nil, _PoolName, _Reply) ->
     ok;
