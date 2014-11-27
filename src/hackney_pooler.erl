@@ -101,7 +101,9 @@ req(Proc, R) ->
     Ref = erlang:monitor(process, Proc),
     Proc ! ?HCALL(self(), R),
     receive
-        {'DOWN', Ref, process, Proc, _Info} ->
+        {'DOWN', Ref, process, Proc, Info} ->
+            error_logger:format("** hackney_pooler: worker down"
+                                ": ~w~n", [Info]),
             badarg;
         {Proc, Reply} ->
             erlang:demonitor(Ref, [flush]),
