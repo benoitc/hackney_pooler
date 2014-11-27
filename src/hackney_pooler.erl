@@ -15,35 +15,21 @@
 -define(HCAST(Pid, Req), {'$hackney_cast', Pid, Req}).
 
 new_pool(PoolName, Config) ->
-    MaxCount = proplists:get_value(max_count, Config, 50),
+    Concurrency = proplists:get_value(concurrency, Config),
     %% get the number of hackney pools to launch
-    {NPool, MaxConn} = case proplists:get_value(concurrency, Config) of
-                           NPool0 when is_integer(NPool0) ->
-                               MaxConn0 = erlang:max(10, trunc(MaxCount / NPool0)),
-                               {NPool0, MaxConn0};
-                           true ->
-                               %% if concurrency is set to true then we
-                               %% launch, then we launch N pools where 2 * N +
-                               %% 2 is the number of threads with a min of 1.
-                               %% The number of connections is then equally
-                               %% shared between them.
-                               N = trunc((erlang:system_info(thread_pool_size) - 1) / 2),
-                               NPool0 = erlang:max(1, N),
-                               MaxConn0 = erlang:max(10, trunc(MaxCount / NPool0)),
-                               {NPool0, MaxConn0};
-                           _ ->
-                               {1, MaxCount}
-                       end,
+    NPool = npool(Concurrency),
+    %% get the number of connections / hackney pools
+    MaxConn = maxconn(Concurrency, NPool, Config),
+
+    %% start pools depending on the concurrency
     HConfig =  [{max_connections, MaxConn}],
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
-    %% start pools depending on the concurrency
     HPools = lists:foldl(fun(_, Acc) ->
                                  Name = {PoolName, make_ref()},
                                  %% start Hackney pool
                                  ok = PoolHandler:start_pool(Name, HConfig),
                                  [Name | Acc]
                          end, [], lists:seq(1, NPool)),
-
 
     %% start worker pool
     Config1 = [{name, PoolName} |Config],
@@ -165,6 +151,31 @@ pooler_loop(#state{parent=Parent, hpools=HPools, name=PoolName}=State) ->
                                 "(ignored): ~w~n", [Message]),
             pooler_loop(State)
     end.
+
+
+npool(true) ->
+    %% if concurrency is set to true then we
+    %% launch, then we launch N pools where 2 * N +
+    %% 2 is the number of threads with a min of 1.
+    %% The number of connections is then equally
+    %% shared between them
+    erlang:max(1, trunc((erlang:system_info(thread_pool_size) - 1) / 2));
+npool(N) when is_integer(N) ->
+    N;
+npool(_) ->
+    1.
+
+
+maxconn(Concurrency, NPool, Options)
+  when Concurrency =:= true orelse is_integer(Concurrency) ->
+    case proplists:get_value(max_connections, Options) of
+        N when is_integer(N) -> N;
+        _ ->
+            MaxCount = proplists:get_value(max_count, Options, 50),
+            erlang:max(10, trunc(MaxCount / NPool) + 1)
+    end;
+maxconn(_, _NPool, Options) ->
+    proplists:get_value(max_count, Options, 50).
 
 
 do_request(From, HPool,  Method, Url, Headers, Body, Options) ->
