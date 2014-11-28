@@ -289,7 +289,7 @@ do_async_request(PoolName, To, HPool,  Method, Url, Headers, Body, Options) ->
         send_async(To, PoolName, Reply)
     catch
         _:_ ->
-            error_logger:error("** hackney_pooler (async req) ~p: "
+            error_logger:format("** hackney_pooler (async req) ~p: "
                                 "unexpected error (ignored): ~w~n", [PoolName,
                                                     erlang:get_stacktrace()])
     end,
