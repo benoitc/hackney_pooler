@@ -1,8 +1,8 @@
 -module(hackney_pooler).
 
 -export([new_pool/2, rm_pool/1, pool_stats/1]).
--export([request/3, request/4, request/5, request/6,
-         async_request/6, async_request/7]).
+-export([request/3, request/4, request/5, request/6, request/7,
+         async_request/6, async_request/7, async_request/8]).
 
 %% internal methods
 -export([istart_link/2, init/3,
@@ -78,11 +78,17 @@ request(PoolName, Method, URL, Headers, Body) ->
 -spec request(atom(), term(), binary()|list(), list(), term(), list())
     -> {ok, integer(), list(), binary()} | {error, term()}.
 request(PoolName, Method, URL, Headers, Body, Options) ->
-    Proc = pooler:take_member(PoolName),
-    try
-        req(Proc, {request, Method, URL, Headers, Body, Options})
-    after
-        pooler:return_member(PoolName, Proc, ok)
+    request(PoolName, Method, URL, Headers, Body, Options, 0).
+
+request(PoolName, Method, URL, Headers, Body, Options, Timeout) ->
+    case pooler:take_member(PoolName, Timeout) of
+        error_no_members -> error_no_members;
+        Proc ->
+            try
+                req(Proc, {request, Method, URL, Headers, Body, Options})
+            after
+                pooler:return_member(PoolName, Proc, ok)
+            end
     end.
 
 -spec async_request(atom(), term(), binary()|list(), list(), term(),
@@ -93,9 +99,15 @@ async_request(PoolName, Method, URL, Headers, Body, Options) ->
 -spec async_request(atom(), term(), term(), binary()|list(), list(), term(),
                     list()) -> ok.
 async_request(PoolName, To, Method, URL, Headers, Body, Options) ->
-    Proc = pooler:take_member(PoolName),
-    cast_req(Proc, To, {request, Method, URL, Headers, Body, Options}),
-    ok.
+    async_request(PoolName, To, Method, URL, Headers, Body, Options, 0).
+
+async_request(PoolName, To, Method, URL, Headers, Body, Options, Timeout) ->
+    case pooler:take_member(PoolName, Timeout) of
+        error_no_members -> error_no_members;
+        Proc ->
+            cast_req(Proc, To, {request, Method, URL, Headers, Body, Options}),
+            ok
+    end.
 
 req(Proc, R) ->
     Ref = erlang:monitor(process, Proc),
