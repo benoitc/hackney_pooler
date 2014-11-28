@@ -14,6 +14,51 @@
 -define(HCALL(Pid, Req), {'$hackney_call', Pid, Req}).
 -define(HCAST(Pid, Req), {'$hackney_cast', Pid, Req}).
 
+%% @doc Start a new pool described by the proplist `PoolConfig'. The
+%% following keys are required in the proplist:
+%%
+%% <dl>
+%% <dt>`init_count'</dt>
+%% <dd>Number of members to add to the pool at start. When the pool is
+%% started, `init_count' members will be started in parallel.</dd>
+%% <dt>`max_count'</dt>
+%% </dl>
+%%
+%% In addition, you can specify any of the following optional
+%% configuration options:
+%%
+%% <dl>
+%% <dt>`max_connections'</dt>
+%% <dd>An integer giving the max number of connections in a pool used in
+%% {@link request/7} and {@link async_request/8}.</dd>
+%% <dt>`concurrency'</dt>
+%% <dd>Make {@link request/7} and {@link async_request/8} concurrent. It set
+%% the number of connections pool (depedending of the number of I/O threads) and the default number of of connections per
+%% pools. Using multiple pool will allows the worker to work quite in parallel.</dd>
+%% %% <dt>`{concurrency, N}'</dt>
+%% <dd>Like above, make {@link request/7} and {@link async_request/8} concurrent. N is an
+%% integer giving the number of connections pool.</dd>
+%% <dt>`cull_interval'</dt>
+%% <dd>Time between checks for stale pool members. Specified as
+%% `{Time, Unit}' where `Time' is a non-negative integer and `Unit' is
+%% one of `min', `sec', `ms', or `mu'. The default value of `{1, min}'
+%% triggers a once per minute check to remove members that have not
+%% been accessed in `max_age' time units. Culling can be disabled by
+%% specifying a zero time vaule (e.g. `{0, min}'. Culling will also be
+%% disabled if `init_count' is the same as `max_count'.</dd>
+%% <dt>`max_age'</dt>
+%% <dd>Members idle longer than `max_age' time units are removed from
+%% the pool when stale checking is enabled via
+%% `cull_interval'. Culling of idle members will never reduce the pool
+%% below `init_count'. The value is specified as `{Time, Unit}'. Note
+%% that timers are not set on individual pool members and may remain
+%% in the pool beyond the configured `max_age' value since members are
+%% only removed on the interval configured via `cull_interval'. The
+%% default value is `{30, sec}'.</dd>
+%% <dt>`member_start_timeout'</dt>
+%% <dd>Time limit for member starts. Specified as `{Time,
+%% Unit}'. Defaults to `{1, min}'.</dd>
+%% </dl>
 new_pool(PoolName, Config) ->
     Concurrency = proplists:get_value(concurrency, Config),
     %% get the number of hackney pools to launch
@@ -37,6 +82,7 @@ new_pool(PoolName, Config) ->
                               {?MODULE, istart_link, [HPools, PoolName]}}],
     pooler:new_pool(PoolConfig).
 
+%% @doc Terminate the named pool.
 rm_pool(Name) ->
     pooler:rm_pool(Name),
     %% stop hackney pools
@@ -47,7 +93,7 @@ rm_pool(Name) ->
                           catch PoolHandler:stop_pool(HPool)
                   end, HPools),
     ok.
-
+%% @doc Obtain runtime state info for all pools.
 pool_stats(Name) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     HPools = [{Name, Ref} || [Ref] <- ets:match(hackney_pool, {{Name, '$1'}, '_'})],
@@ -91,16 +137,22 @@ request(PoolName, Method, URL, Headers, Body, Options, Timeout) ->
             end
     end.
 
+%% @doc make an async request and don't wit for the result
 -spec async_request(atom(), term(), binary()|list(), list(), term(),
                     list()) -> ok.
 async_request(PoolName, Method, URL, Headers, Body, Options) ->
     async_request(PoolName, nil, Method, URL, Headers, Body, Options).
 
+
+%% @doc make an async request and retrieve the results as a message in a
+%% process or by using a function.
 -spec async_request(atom(), term(), term(), binary()|list(), list(), term(),
                     list()) -> ok.
 async_request(PoolName, To, Method, URL, Headers, Body, Options) ->
     async_request(PoolName, To, Method, URL, Headers, Body, Options, 0).
 
+-spec async_request(atom(), term(), term(), binary()|list(), list(), term(),
+                    list(), integer()) -> ok.
 async_request(PoolName, To, Method, URL, Headers, Body, Options, Timeout) ->
     case pooler:take_member(PoolName, Timeout) of
         error_no_members -> error_no_members;
