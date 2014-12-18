@@ -31,7 +31,7 @@ init([]) ->
 init_pools() ->
     case application:get_env(hackney_pooler, pools) of
         undefined -> ok;
-        Pools ->
+        {ok, Pools} ->
             lists:foreach(fun({PoolName, Conf}) ->
                                   Conf1 = case Conf of
                                               default -> default_conf();
@@ -45,5 +45,5 @@ init_pools() ->
 default_conf() ->
     case application:get_env(hackney_pooler, default_conf) of
         undefined -> [];
-        Default -> Default
+        {ok, Default} -> Default
     end.
