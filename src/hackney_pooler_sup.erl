@@ -8,15 +8,16 @@
 %% Supervisor callbacks
 -export([init/1]).
 
-%% Helper macro for declaring children of supervisor
--define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
-
 %% ===================================================================
 %% API functions
 %% ===================================================================
 
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    {ok, Pid} = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
+    %% init pools
+    init_pools(),
+    {ok, Pid}.
+
 
 %% ===================================================================
 %% Supervisor callbacks
@@ -24,3 +25,25 @@ start_link() ->
 
 init([]) ->
     {ok, { {one_for_one, 5, 10}, []} }.
+
+
+
+init_pools() ->
+    case application:get_env(hackney_pooler, pools) of
+        undefined -> ok;
+        Pools ->
+            lists:foreach(fun({PoolName, Conf}) ->
+                                  Conf1 = case Conf of
+                                              default -> default_conf();
+                                              Conf -> Conf
+                                          end,
+                                  hackney_pooler:new_pool(PoolName, Conf1)
+                          end, Pools)
+    end.
+
+
+default_conf() ->
+    case application:get_env(hackney_pooler, default_conf) of
+        undefined -> [];
+        Default -> Default
+    end.
