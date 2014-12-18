@@ -138,16 +138,16 @@ handle_cast({request, To, Method, Url, Headers, Body, Options}, State) ->
         send_async(To, State#state.name, Reply)
     catch
         _:_ ->
-            error_logger:format("** hackney_pooler (async req) ~p: "
-                                "unexpected error (ignored): ~w~n",
-                                [State#state.name, erlang:get_stacktrace()])
+            lager:error("** hackney_pooler (async req) ~p: "
+                        "unexpected error (ignored): ~w~n",
+                        [State#state.name, erlang:get_stacktrace()])
     end,
     {noreply, State#state{hpools=HPools2}}.
 
 
 handle_info(Message, State) ->
-    error_logger:format("** hackney_pooler: unexpected message"
-                                "(ignored): ~w~n", [Message]),
+    lager:info("** hackney_pooler: unexpected message"
+               "(ignored): ~w~n", [Message]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -225,6 +225,6 @@ send_async(Fun, PoolName, Reply) when is_function(Fun) ->
 send_async({Fun, Acc}, PoolName, Reply) when is_function(Fun) ->
     Fun({PoolName, Reply}, Acc);
 send_async(To, PoolName, _Reply) ->
-    error_logger:format("** ~p hackney_pooler: unexpected async callback"
-                                "(ignored): ~w~n", [PoolName, To]),
+    lager:notice("** ~p hackney_pooler: unexpected async callback"
+                 "(ignored): ~w~n", [PoolName, To]),
     ok.
