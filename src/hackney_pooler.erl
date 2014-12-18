@@ -1,12 +1,13 @@
 -module(hackney_pooler).
+-behaviour(gen_server).
 
 -export([new_pool/2, rm_pool/1, pool_stats/1]).
--export([request/3, request/4, request/5, request/6, request/7,
-         async_request/6, async_request/7, async_request/8]).
+-export([request/3, request/4, request/5, request/6,
+         async_request/6, async_request/7]).
 
 %% internal methods
--export([istart_link/2, init/3,
-         system_continue/3, system_terminate/4, system_code_change/4]).
+-export([init/1, handle_call/3, handle_cast/2,
+         handle_info/2, terminate/2, code_change/3]).
 
 -record(state, {parent, hpools, name}).
 
@@ -18,46 +19,9 @@
 %% following keys are required in the proplist:
 %%
 %% <dl>
-%% <dt>`init_count'</dt>
-%% <dd>Number of members to add to the pool at start. When the pool is
-%% started, `init_count' members will be started in parallel.</dd>
-%% <dt>`max_count'</dt>
-%% </dl>
-%%
-%% In addition, you can specify any of the following optional
-%% configuration options:
-%%
-%% <dl>
 %% <dt>`max_connections'</dt>
 %% <dd>An integer giving the max number of connections in a pool used in
 %% {@link request/7} and {@link async_request/8}.</dd>
-%% <dt>`concurrency'</dt>
-%% <dd>Make {@link request/7} and {@link async_request/8} concurrent. It set
-%% the number of connections pool (depedending of the number of I/O threads) and the default number of of connections per
-%% pools. Using multiple pool will allows the worker to work quite in parallel.</dd>
-%% %% <dt>`{concurrency, N}'</dt>
-%% <dd>Like above, make {@link request/7} and {@link async_request/8} concurrent. N is an
-%% integer giving the number of connections pool.</dd>
-%% <dt>`cull_interval'</dt>
-%% <dd>Time between checks for stale pool members. Specified as
-%% `{Time, Unit}' where `Time' is a non-negative integer and `Unit' is
-%% one of `min', `sec', `ms', or `mu'. The default value of `{1, min}'
-%% triggers a once per minute check to remove members that have not
-%% been accessed in `max_age' time units. Culling can be disabled by
-%% specifying a zero time vaule (e.g. `{0, min}'. Culling will also be
-%% disabled if `init_count' is the same as `max_count'.</dd>
-%% <dt>`max_age'</dt>
-%% <dd>Members idle longer than `max_age' time units are removed from
-%% the pool when stale checking is enabled via
-%% `cull_interval'. Culling of idle members will never reduce the pool
-%% below `init_count'. The value is specified as `{Time, Unit}'. Note
-%% that timers are not set on individual pool members and may remain
-%% in the pool beyond the configured `max_age' value since members are
-%% only removed on the interval configured via `cull_interval'. The
-%% default value is `{30, sec}'.</dd>
-%% <dt>`member_start_timeout'</dt>
-%% <dd>Time limit for member starts. Specified as `{Time,
-%% Unit}'. Defaults to `{1, min}'.</dd>
 %% </dl>
 new_pool(PoolName, Config) ->
     Concurrency = proplists:get_value(concurrency, Config),
@@ -77,14 +41,13 @@ new_pool(PoolName, Config) ->
                          end, [], lists:seq(1, NPool)),
 
     %% start worker pool
-    Config1 = [{name, PoolName} |Config],
-    PoolConfig = Config1 ++ [{start_mfa,
-                              {?MODULE, istart_link, [HPools, PoolName]}}],
-    pooler:new_pool(PoolConfig).
+
+    PoolConfig = [{worker, {?MODULE, [HPools, PoolName]}}] ++ Config,
+    wpool:start_pool(PoolName, PoolConfig).
 
 %% @doc Terminate the named pool.
 rm_pool(Name) ->
-    pooler:rm_pool(Name),
+    wpool:stop_pool(Name),
     %% stop hackney pools
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     HPools = [{Name, Ref} || [Ref] <- ets:match(hackney_pool,
@@ -97,7 +60,7 @@ rm_pool(Name) ->
 pool_stats(Name) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     HPools = [{Name, Ref} || [Ref] <- ets:match(hackney_pool, {{Name, '$1'}, '_'})],
-    [{workers, pooler:pool_stats(Name)},
+    [{workers, wpool:stats(Name)},
      {hpools, [{PoolHandler:find_pool(P), PoolHandler:count(P)}
                || P <- HPools]}].
 
@@ -124,18 +87,7 @@ request(PoolName, Method, URL, Headers, Body) ->
 -spec request(atom(), term(), binary()|list(), list(), term(), list())
     -> {ok, integer(), list(), binary()} | {error, term()}.
 request(PoolName, Method, URL, Headers, Body, Options) ->
-    request(PoolName, Method, URL, Headers, Body, Options, 0).
-
-request(PoolName, Method, URL, Headers, Body, Options, Timeout) ->
-    case pooler:take_member(PoolName, Timeout) of
-        error_no_members -> error_no_members;
-        Proc ->
-            try
-                req(Proc, {request, Method, URL, Headers, Body, Options})
-            after
-                pooler:return_member(PoolName, Proc, ok)
-            end
-    end.
+    wpool:call(PoolName, {request, Method, URL, Headers, Body, Options}).
 
 %% @doc make an async request and don't wit for the result
 -spec async_request(atom(), term(), binary()|list(), list(), term(),
@@ -149,74 +101,54 @@ async_request(PoolName, Method, URL, Headers, Body, Options) ->
 -spec async_request(atom(), term(), term(), binary()|list(), list(), term(),
                     list()) -> ok.
 async_request(PoolName, To, Method, URL, Headers, Body, Options) ->
-    async_request(PoolName, To, Method, URL, Headers, Body, Options, 0).
-
--spec async_request(atom(), term(), term(), binary()|list(), list(), term(),
-                    list(), integer()) -> ok.
-async_request(PoolName, To, Method, URL, Headers, Body, Options, Timeout) ->
-    case pooler:take_member(PoolName, Timeout) of
-        error_no_members -> error_no_members;
-        Proc ->
-            cast_req(Proc, To, {request, Method, URL, Headers, Body, Options}),
-            ok
-    end.
-
-req(Proc, R) ->
-    Ref = erlang:monitor(process, Proc),
-    Proc ! ?HCALL(self(), R),
-    receive
-        {'DOWN', Ref, process, Proc, Info} ->
-            error_logger:format("** hackney_pooler: worker down"
-                                ": ~w~n", [Info]),
-            badarg;
-        {Proc, Reply} ->
-            erlang:demonitor(Ref, [flush]),
-            Reply
-    end.
+    wpool:cast(PoolName, {To, request, Method, URL, Headers, Body, Options}).
 
 
-cast_req(Proc, To, R) ->
-    Msg = ?HCAST(To, R),
-    case catch erlang:send(Proc, Msg, [noconnect]) of
-        noconnect ->
-            spawn(erlang, send, [Proc, Msg]);
-        Other ->
-            Other
-    end.
 
-
-istart_link(HPools, Name) ->
-    {ok, proc_lib:spawn_link(hackney_pooler, init, [self(), HPools, Name])}.
-
-
-init(Parent, HPools, Name) ->
+init([HPools, Name]) ->
     process_flag(trap_exit, true),
-    pooler_loop(#state{parent=Parent, hpools=HPools, name=Name}).
+    {ok, #state{hpools=HPools, name=Name}}.
 
 
+handle_call({request, Method, Url, Headers, Body, Options}, _From, State) ->
+     {HPool, HPools2} = choose_pool(State#state.hpools),
+     Reply = do_request(HPool, Method, Url, Headers, Body, Options),
+     {reply, Reply, State#state{hpools=HPools2}}.
 
-pooler_loop(#state{parent=Parent, hpools=HPools, name=PoolName}=State) ->
-    receive
-        ?HCALL(From, {request, Method, Url, Headers, Body, Options}) ->
-            {HPool, HPools2} = choose_pool(HPools),
-            do_request(From, HPool, Method, Url, Headers, Body, Options),
-            pooler_loop(State#state{hpools=HPools2});
-        ?HCAST(To, {request, Method, Url, Headers, Body, Options}) ->
-            {HPool, HPools2} = choose_pool(HPools),
-            do_async_request(PoolName, To, HPool, Method, Url, Headers, Body,
-                             Options),
-            pooler:return_member(PoolName, self(), ok),
-            pooler_loop(State#state{hpools=HPools2});
-        {'EXIT', Parent, Reason} ->
-            terminate(Reason, State),
-            exit(Reason);
-        {system, From, Req} ->
-            sys:handle_system_msg(Req, From, Parent, ?MODULE, [], State);
-        Message ->
-            error_logger:format("** hackney_pooler: unexpected message"
+handle_cast({request, To, Method, Url, Headers, Body, Options}, State) ->
+    {HPool, HPools2} = choose_pool(State#state.hpools),
+    Reply = do_request(HPool, Method, Url, Headers, Body, Options),
+
+    try
+        send_async(To, State#state.name, Reply)
+    catch
+        _:_ ->
+            error_logger:format("** hackney_pooler (async req) ~p: "
+                                "unexpected error (ignored): ~w~n",
+                                [State#state.name, erlang:get_stacktrace()])
+    end,
+    {noreply, State#state{hpools=HPools2}}.
+
+
+handle_info(Message, State) ->
+    error_logger:format("** hackney_pooler: unexpected message"
                                 "(ignored): ~w~n", [Message]),
-            pooler_loop(State)
-    end.
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+     %% if a request is running, force close
+    case erlang:get(req) of
+        undefined -> ok;
+        Ref ->
+            catch hackney:close(Ref),
+            ok
+    end,
+    ok.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
 
 
 npool(true) ->
@@ -241,60 +173,27 @@ maxconn(Concurrency, NPool, Options)
             erlang:max(10, trunc(MaxCount / NPool) + 1)
     end;
 maxconn(_, _NPool, Options) ->
-    proplists:get_value(max_count, Options, 50).
+    proplists:get_value(max_count, Options, 100).
 
 
-do_request(From, HPool,  Method, Url, Headers, Body, Options) ->
+do_request(HPool,  Method, Url, Headers, Body, Options) ->
     %% pass the pool to the config.
     Options1 = [{pool, HPool} | Options],
     %% do the request
-    Reply = case hackney:request(Method, Url, Headers, Body, Options1) of
-                {ok, Status, RespHeaders, Ref} ->
-                    erlang:put(req, Ref),
-                    case hackney:body(Ref) of
-                        {ok, RespBody} ->
-                            erlang:erase(req),
-                            {ok, Status, RespHeaders, RespBody};
-                        Error -> Error
-                    end;
-                {ok, Status, RespHeaders} ->
-                    {ok, Status, RespHeaders, <<>>};
-                Error ->
-                    Error
-            end,
-    %% send the reply
-    From ! {self(), Reply},
-    ok.
-
-do_async_request(PoolName, To, HPool,  Method, Url, Headers, Body, Options) ->
-    %% pass the pool to the config.
-    Options1 = [{pool, HPool} | Options],
-    %% do the request
-    Reply = case hackney:request(Method, Url, Headers, Body, Options1) of
-                {ok, Status, RespHeaders, Ref} ->
-                    erlang:put(req, Ref),
-                    case hackney:body(Ref) of
-                        {ok, RespBody} ->
-                            erlang:erase(req),
-                            {ok, Status, RespHeaders, RespBody};
-                        Error -> Error
-                    end;
-                {ok, Status, RespHeaders} ->
-                    {ok, Status, RespHeaders, <<>>};
-                Error ->
-                    Error
-            end,
-
-    try
-        send_async(To, PoolName, Reply)
-    catch
-        _:_ ->
-            error_logger:format("** hackney_pooler (async req) ~p: "
-                                "unexpected error (ignored): ~w~n", [PoolName,
-                                                    erlang:get_stacktrace()])
-    end,
-    ok.
-
+    case hackney:request(Method, Url, Headers, Body, Options1) of
+        {ok, Status, RespHeaders, Ref} ->
+            erlang:put(req, Ref),
+            case hackney:body(Ref) of
+                {ok, RespBody} ->
+                    erlang:erase(req),
+                    {ok, Status, RespHeaders, RespBody};
+                Error -> Error
+            end;
+        {ok, Status, RespHeaders} ->
+            {ok, Status, RespHeaders, <<>>};
+        Error ->
+            Error
+    end.
 
 %% balance pool
 choose_pool([HPool]=HPools) ->
@@ -314,30 +213,3 @@ send_async(To, PoolName, _Reply) ->
     error_logger:format("** ~p hackney_pooler: unexpected async callback"
                                 "(ignored): ~w~n", [PoolName, To]),
     ok.
-
-terminate(_Reason, _State) ->
-    %% if a request is running, force close
-    case erlang:get(req) of
-        undefined -> ok;
-        Ref ->
-            catch hackney:close(Ref),
-            ok
-    end,
-    ok.
-
-
-%%-----------------------------------------------------------------
-%% Callback functions for system messages handling.
-%%-----------------------------------------------------------------
-system_continue(_Parent, _, State) ->
-    pooler_loop(State).
-
-system_terminate(Reason, _Parent, _, State) ->
-    terminate(Reason, State),
-    exit(Reason).
-
-%%-----------------------------------------------------------------
-%% Code for upgrade.
-%%-----------------------------------------------------------------
-system_code_change(State, _Module, _OldVsn, _Extra) ->
-    {ok, State}.
