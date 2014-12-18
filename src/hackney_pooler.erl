@@ -2,8 +2,8 @@
 -behaviour(gen_server).
 
 -export([new_pool/2, rm_pool/1, pool_stats/1]).
--export([request/3, request/4, request/5, request/6,
-         async_request/6, async_request/7]).
+-export([request/3, request/4, request/5, request/6, request/7, request/8,
+         async_request/6, async_request/7, async_request/8]).
 
 %% internal methods
 -export([init/1, handle_call/3, handle_cast/2,
@@ -87,7 +87,17 @@ request(PoolName, Method, URL, Headers, Body) ->
 -spec request(atom(), term(), binary()|list(), list(), term(), list())
     -> {ok, integer(), list(), binary()} | {error, term()}.
 request(PoolName, Method, URL, Headers, Body, Options) ->
-    wpool:call(PoolName, {request, Method, URL, Headers, Body, Options}).
+    request(PoolName, Method, URL, Headers, Body, Options,
+            wpool:default_strategy()).
+
+request(PoolName, Method, URL, Headers, Body, Options, Strategy) ->
+    request(PoolName, Method, URL, Headers, Body, Options, Strategy, 5000).
+
+request(PoolName, Method, URL, Headers, Body, Options, Strategy, Timeout) ->
+    wpool:call(PoolName, {request, Method, URL, Headers, Body, Options},
+               Strategy, Timeout).
+
+
 
 %% @doc make an async request and don't wit for the result
 -spec async_request(atom(), term(), binary()|list(), list(), term(),
@@ -101,8 +111,13 @@ async_request(PoolName, Method, URL, Headers, Body, Options) ->
 -spec async_request(atom(), term(), term(), binary()|list(), list(), term(),
                     list()) -> ok.
 async_request(PoolName, To, Method, URL, Headers, Body, Options) ->
-    wpool:cast(PoolName, {request, To, Method, URL, Headers, Body, Options}).
+    wpool:cast(PoolName, To, Method, URL, Headers, Body, Options,
+               wpool:default_strategy()).
 
+
+async_request(PoolName, To, Method, URL, Headers, Body, Options, Strategy) ->
+    wpool:cast(PoolName, {request, To, Method, URL, Headers, Body, Options},
+               Strategy).
 
 
 init([HPools, Name]) ->
