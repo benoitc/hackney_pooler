@@ -184,7 +184,7 @@ maxconn(Concurrency, NPool, Options)
     case proplists:get_value(max_connections, Options) of
         N when is_integer(N) -> N;
         _ ->
-            MaxCount = proplists:get_value(max_count, Options, 50),
+            MaxCount = proplists:get_value(workers, Options, 100),
             erlang:max(10, trunc(MaxCount / NPool) + 1)
     end;
 maxconn(_, _NPool, Options) ->
