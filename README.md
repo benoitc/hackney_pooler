@@ -74,6 +74,25 @@ it will be handled in the worker.
 > An async request can send requests to a pid, a function (arity 1 or 2) or
 > nothing if nil is given.
 
+## Pool Configuration via application environment
+
+    % hackneypooler.config
+    % Start Erlang as: erl -config pooler
+    % -*- mode: erlang -*-
+    % hackney_pooler app config
+    [
+     {hackney_pooler, [
+             {pools, [
+                      [{name, test},
+                       {maxconn, 50},
+                       {pool_size, 100}
+                       {concurrency, 2}]
+            ]}
+    ].
+
+
+You can also pass default settinsg using the `default_conf` env setting.
+
 ## Known limitations
 
 - Streams are not handled. A body is fetched entirely when the worker return.
