@@ -188,7 +188,7 @@ maxconn(Concurrency, NPool, Options)
             erlang:max(10, trunc(MaxCount / NPool) + 1)
     end;
 maxconn(_, _NPool, Options) ->
-    proplists:get_value(max_count, Options, 100).
+    proplists:get_value(workers, Options, 100).
 
 
 do_request(HPool,  Method, Url, Headers, Body, Options) ->
