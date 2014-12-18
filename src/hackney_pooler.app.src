@@ -15,7 +15,7 @@
                   hackney,
                   worker_pool
                  ]},
-  {included_applications, [idna]},
+  {included_applications, []},
   {mod, { hackney_pooler_app, []}},
   {env, []}
  ]}.
