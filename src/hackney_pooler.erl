@@ -111,8 +111,8 @@ async_request(PoolName, Method, URL, Headers, Body, Options) ->
 -spec async_request(atom(), term(), term(), binary()|list(), list(), term(),
                     list()) -> ok.
 async_request(PoolName, To, Method, URL, Headers, Body, Options) ->
-    wpool:cast(PoolName, To, Method, URL, Headers, Body, Options,
-               wpool:default_strategy()).
+    async_request(PoolName, To, Method, URL, Headers, Body, Options,
+                  wpool:default_strategy()).
 
 
 async_request(PoolName, To, Method, URL, Headers, Body, Options, Strategy) ->
