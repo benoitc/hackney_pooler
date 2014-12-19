@@ -6,14 +6,16 @@
   {applications, [
                   kernel,
                   stdlib,
+                  lager,
                   asn1,
                   crypto,
                   public_key,
                   ssl,
+                  inets,
                   hackney,
-                  pooler
+                  worker_pool
                  ]},
-  {included_applications, [idna]},
+  {included_applications, []},
   {mod, { hackney_pooler_app, []}},
   {env, []}
  ]}.

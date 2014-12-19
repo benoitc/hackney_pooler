@@ -18,13 +18,14 @@ workers in a pool. A pool group is sharing a pool and a pool can be shared
 between multiples groups if given in the pool config.
 
 Internally a pool is maintained using
-[pooler](https://github.com/seth/pooler).
+[worker_pool](https://github.com/inaka/worker_pool).
 
 ## Example of a synchronous request:
 
     1> application:ensure_all_started(hackney_pooler).
     {ok,[asn1,crypto,public_key,ssl,hackney_pooler]}
-    2> hackney_pooler:new_pool(test, [{group, api}, {max_count ,50}, {init_count, 10}]).
+    2> hackney_pooler:new_pool(test, [{workers,1000}, {concurrency, 4},
+                                      {max_connections, 150}]).
     {ok,<0.54.0>}
     4> hackney_pooler:request(test, get, <<"https://friendpaste.com">>).
     {ok,200,
@@ -84,9 +85,8 @@ it will be handled in the worker.
      {hackney_pooler, [
              {pools, [
                       [{name, test},
-                       {maxconn, 50},
-                       {pool_size, 100}
-                       {concurrency, 2}]
+                       {workers, 1000},
+                       {concurrency, true}]
             ]}
     ].
 
