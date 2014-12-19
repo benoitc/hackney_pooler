@@ -1,10 +1,5 @@
 # hackney_pooler
 
-
-**EXPERIMENTAL CODE** - This code is an experimentation of a futur change in
-hackney paradigm. It's only used to prepare coming changes and validate this
-pattern in hackney 2.
-
 ## Goal:
 
 Experiment an API to limit the number of requests launched concurrently.
