@@ -82,8 +82,8 @@ it will be handled in the worker.
                       [{name, test},
                        {workers, 1000},
                        {concurrency, true}]
-            ]}
-    ].
+            ]}]}
+    ]
 
 
 You can also pass default settinsg using the `default_conf` env setting.
