@@ -34,7 +34,7 @@ new_pool(PoolName, Config) ->
     HConfig =  [{max_connections, MaxConn}],
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     HPools = lists:foldl(fun(_, Acc) ->
-                                 Name = {PoolName, make_ref()},
+                                 Name = {PoolName, uniqid()},
                                  %% start Hackney pool
                                  ok = PoolHandler:start_pool(Name, HConfig),
                                  [Name | Acc]
@@ -228,3 +228,6 @@ send_async(To, PoolName, _Reply) ->
     lager:notice("** ~p hackney_pooler: unexpected async callback"
                  "(ignored): ~w~n", [PoolName, To]),
     ok.
+
+uniqid() ->
+    integer_to_list(erlang:phash2(make_ref())).
